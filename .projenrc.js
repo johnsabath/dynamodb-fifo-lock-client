@@ -29,11 +29,11 @@ const project = new TypeScriptProject({
 // Build project on CI pushes to "main" branch so that code coverage is updated
 project.buildWorkflow.on({
   push: {
-    branches: ["main"]
+    branches: ['main'],
   },
   pull_request: {},
-  workflow_dispatch: {}
-})
+  workflow_dispatch: {},
+});
 
 // Update "test" task to spin-up localstack.
 const localstackStartTask = project.tasks.tryFind('localstack:start');
