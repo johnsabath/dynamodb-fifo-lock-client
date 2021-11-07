@@ -4,7 +4,7 @@
 
 ### Status: Experimental
 
-AWS DynamoDB distributed locking client with fencing tokens, heartbeats, and FIFO acquisition semantics.
+AWS DynamoDB distributed locking client with fencing tokens and FIFO acquisition semantics.
 
 Inspired by:
 - [AWS Blog Post: Building Distributed Locks with the DynamoDB Lock Client](https://aws.amazon.com/blogs/database/building-distributed-locks-with-the-dynamodb-lock-client/)
