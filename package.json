@@ -1,6 +1,6 @@
 {
   "name": "dynamodb-fifo-lock-client",
-  "description": "AWS DynamoDB distributed locking client with fencing tokens and FIFO acquisition semantics",
+  "description": "AWS DynamoDB distributed locking client with fencing tokens and FIFO acquisition queueing",
   "scripts": {
     "clobber": "npx projen clobber",
     "localstack:start": "npx projen localstack:start",
