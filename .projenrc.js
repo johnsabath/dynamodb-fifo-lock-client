@@ -5,7 +5,7 @@ const LOCALSTACK_CONTAINER_NAME = 'dynamodb-fifo-lock-client-localstack';
 
 const project = new TypeScriptProject({
   name: 'dynamodb-fifo-lock-client',
-  description: 'AWS DynamoDB distributed locking client with fencing tokens and FIFO acquisition semantics',
+  description: 'AWS DynamoDB distributed locking client with fencing tokens and FIFO acquisition semantics.',
   projectType: ProjectType.LIB,
   defaultReleaseBranch: 'main',
   scripts: {
@@ -21,10 +21,21 @@ const project = new TypeScriptProject({
     },
   },
   releaseWorkflow: true,
+  collectCoverage: true,
   codeCov: true,
   codeCovTokenSecret: 'CODECOV_TOKEN',
 });
 
+// Build project on CI pushes to "main" branch so that code coverage is updated
+project.buildWorkflow.on({
+  push: {
+    branches: ["main"]
+  },
+  pull_request: {},
+  workflow_dispatch: {}
+})
+
+// Update "test" task to spin-up localstack.
 const localstackStartTask = project.tasks.tryFind('localstack:start');
 const localstackStopTask = project.tasks.tryFind('localstack:stop');
 project.testTask.env('AWS_ACCESS_KEY_ID', 'localkey');
