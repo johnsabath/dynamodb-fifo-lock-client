@@ -5,7 +5,7 @@ const LOCALSTACK_CONTAINER_NAME = 'dynamodb-fifo-lock-client-localstack';
 
 const project = new TypeScriptProject({
   name: 'dynamodb-fifo-lock-client',
-  description: 'AWS DynamoDB distributed locking client with fencing tokens and FIFO acquisition semantics.',
+  description: 'AWS DynamoDB distributed locking client with fencing tokens and FIFO acquisition semantics',
   projectType: ProjectType.LIB,
   defaultReleaseBranch: 'main',
   scripts: {
