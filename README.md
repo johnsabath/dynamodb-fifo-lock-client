@@ -10,8 +10,6 @@ Inspired by:
 - [AWS Blog Post: Building Distributed Locks with the DynamoDB Lock Client](https://aws.amazon.com/blogs/database/building-distributed-locks-with-the-dynamodb-lock-client/)
 - [Formidable Labs: Distributed Locking](https://formidable.com/blog/2020/distributed-locking/)
 
-Note: This library expects `aws-sdk` to be available as a peer dependency.
-
 ## Usage
 
 ### Setup
