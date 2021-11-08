@@ -93,7 +93,11 @@ export class DynamoDbLockClient {
         this.leaveWaitingQueue({
           lockId: args.lockId,
           ticketNumber: ticketNumber,
-        }).catch((e) => console.error("Failed to leave waiting queue: " + e));
+        }).catch((e) => {
+          // It's acceptable to fail relatively silently here as follow-up lock acquisitions will delete
+          // the expired queue position.
+          console.error("Failed to leave waiting queue: " + e)
+        });
       };
 
       // Execute lock expiration renewal function every heartbeatPeriodMs milliseconds
@@ -221,8 +225,8 @@ export class DynamoDbLockClient {
               .deleteItem({
                 TableName: this.tableName,
                 Key: {
-                  PartitionKey: { S: it.PartitionKey },
-                  SortKey: { S: it.SortKey },
+                  PartitionKey: it.PartitionKey,
+                  SortKey: it.SortKey,
                 },
               })
               .promise()
