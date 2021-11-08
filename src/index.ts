@@ -1,4 +1,4 @@
-import * as DynamoClient from "aws-sdk/clients/dynamodb";
+import * as DynamoClient from 'aws-sdk/clients/dynamodb';
 
 export type AcquireLockArgs = {
   /**
@@ -60,7 +60,7 @@ export class DynamoDbLockClient {
    */
   async executeWithLock<T extends () => any>(
     args: AcquireLockArgs,
-    fn: T
+    fn: T,
   ): Promise<UnwrapPromise<ReturnType<T>>> {
     const startEpochMs = new Date().getTime();
     const timeoutEpochMs =
@@ -126,7 +126,7 @@ export class DynamoDbLockClient {
           const nowEpochMs = new Date().getTime();
           if (nowEpochMs >= timeoutEpochMs) {
             throw new LockAcquisitionTimeout(
-              "Unable to acquire lock within timeout period"
+              'Unable to acquire lock within timeout period',
             );
           }
 
@@ -181,17 +181,17 @@ export class DynamoDbLockClient {
             },
           },
           ExpressionAttributeValues: {
-            ":expiresAt": {
+            ':expiresAt': {
               N: args.expiresAt.toString(),
             },
           },
-          ConditionExpression: "attribute_exists(PartitionKey)",
-          UpdateExpression: "SET expiresAt = :expiresAt",
+          ConditionExpression: 'attribute_exists(PartitionKey)',
+          UpdateExpression: 'SET expiresAt = :expiresAt',
         })
         .promise();
     } catch (e: any) {
-      if (e.code === "ConditionalCheckFailedException") {
-        throw new LockNotFound("Failed to renew lock. Lock does not exist.");
+      if (e.code === 'ConditionalCheckFailedException') {
+        throw new LockNotFound('Failed to renew lock. Lock does not exist.');
       } else {
         throw e;
       }
@@ -229,11 +229,11 @@ export class DynamoDbLockClient {
                   SortKey: it.SortKey,
                 },
               })
-              .promise()
-          )
+              .promise(),
+          ),
         );
       }
-    }
+    };
 
     do {
       const res = await this.dynamo
@@ -242,9 +242,9 @@ export class DynamoDbLockClient {
           ConsistentRead: true,
           ExclusiveStartKey: lastEvaluatedKey,
           ExpressionAttributeValues: {
-            ":partitionKey": { S: `lock-client:lock:${args.lockId}` },
+            ':partitionKey': { S: `lock-client:lock:${args.lockId}` },
           },
-          KeyConditionExpression: "PartitionKey = :partitionKey",
+          KeyConditionExpression: 'PartitionKey = :partitionKey',
           Limit: 100,
           ScanIndexForward: true,
         })
@@ -267,7 +267,7 @@ export class DynamoDbLockClient {
           return false;
         }
       }
-  
+
       // lastEvaluatedKey will be set if there is more than one page of results left, allowing for us to paginate.
       lastEvaluatedKey = res.LastEvaluatedKey;
     } while (lastEvaluatedKey !== undefined);
@@ -294,7 +294,7 @@ export class DynamoDbLockClient {
           createdAt: { N: new Date().getTime().toString() },
           expiresAt: { N: args.expiresAt.toString() },
         },
-        ConditionExpression: "attribute_not_exists(PartitionKey)",
+        ConditionExpression: 'attribute_not_exists(PartitionKey)',
       })
       .promise();
   }
@@ -332,40 +332,40 @@ export class DynamoDbLockClient {
               S: `lock-client:lock:${lockId}:ticket-number`,
             },
             SortKey: {
-              S: "current",
+              S: 'current',
             },
           },
-          ConditionExpression: "attribute_exists(PartitionKey)",
+          ConditionExpression: 'attribute_exists(PartitionKey)',
           ExpressionAttributeValues: {
-            ":ticketNumber": {
-              N: "1",
+            ':ticketNumber': {
+              N: '1',
             },
           },
-          ReturnValues: "UPDATED_NEW",
-          UpdateExpression: "SET ticketNumber = ticketNumber + :ticketNumber",
+          ReturnValues: 'UPDATED_NEW',
+          UpdateExpression: 'SET ticketNumber = ticketNumber + :ticketNumber',
         })
         .promise();
 
       return res.Attributes!.ticketNumber.N!;
     } catch (e: any) {
       // Ticket Number doesn't exist
-      if (e.code === "ConditionalCheckFailedException") {
+      if (e.code === 'ConditionalCheckFailedException') {
         try {
           await this.dynamo
             .putItem({
               TableName: this.tableName,
-              ConditionExpression: "attribute_not_exists(PartitionKey)",
+              ConditionExpression: 'attribute_not_exists(PartitionKey)',
               Item: {
                 PartitionKey: { S: `lock-client:lock:${lockId}:ticket-number` },
-                SortKey: { S: "current" },
-                ticketNumber: { N: "1" },
+                SortKey: { S: 'current' },
+                ticketNumber: { N: '1' },
               },
             })
             .promise();
-          return "1";
+          return '1';
         } catch (e2: any) {
           // Someone else created it before us, let's loop back to incrementing
-          if (e2.code === "ConditionalCheckFailedException") {
+          if (e2.code === 'ConditionalCheckFailedException') {
             return this.getNextTicketNumber(lockId);
           } else {
             throw e2;
@@ -387,13 +387,13 @@ export function sleep(ms: number): Promise<void> {
 export class LockAcquisitionTimeout extends Error {
   constructor(message: string) {
     super(message);
-    this.name = "LockAcquisitionTimeout";
+    this.name = 'LockAcquisitionTimeout';
   }
 }
 
 export class LockNotFound extends Error {
   constructor(message: string) {
     super(message);
-    this.name = "LockNotFound";
+    this.name = 'LockNotFound';
   }
 }
