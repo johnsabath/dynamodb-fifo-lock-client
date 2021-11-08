@@ -10,6 +10,12 @@ Inspired by:
 - [AWS Blog Post: Building Distributed Locks with the DynamoDB Lock Client](https://aws.amazon.com/blogs/database/building-distributed-locks-with-the-dynamodb-lock-client/)
 - [Formidable Labs: Distributed Locking](https://formidable.com/blog/2020/distributed-locking/)
 
+## Why does this exist?
+
+It all started when I began experimenting with AWS CloudFormation custom resources provisioned by lambda functions.  One of those custom resources was wanting to reserve a unique name, which introduced a possible race condition as multiple deployments for the same name could happen at the same time.
+
+This library resolves those race conditions by writing atomically incremented fencing tokens into DynamoDB.  It also provides FIFO queuing for lock acquisitions rather than a naive "acquire the lock if no one else has it" approach.  This avoids situations where an actor gets unlucky and is unable to acquire the lock because other actors consistently checked earlier than they did.
+
 ## Usage
 
 ### Setup
