@@ -1,5 +1,5 @@
 import waitForExpect from 'wait-for-expect';
-import { sleep } from '../src/index';
+import { LockNotFound, sleep } from '../src/index';
 import { getDynamoItems, initContext, TEST_DYNAMO_TABLE_NAME } from './context';
 
 describe('DynamoDB Lock Client', () => {
@@ -265,5 +265,70 @@ describe('executeWithLock', () => {
     await expect(resPromise).rejects.toEqual(
       new Error('Unable to acquire lock within timeout period'),
     );
+  });
+
+  it('raises exception when lock does not exist on heartbeat', async () => {
+    const context = initContext();
+    const lockId = 'lock-id';
+
+    await expect(
+      context.dynamoLockClient.sendHeartbeat({
+        lockId: lockId,
+        ticketNumber: '1',
+        expiresAt: new Date().getTime() + 10000,
+      }),
+    ).rejects.toEqual(
+      new LockNotFound('Failed to renew lock. Lock does not exist.'),
+    );
+  });
+
+  it('isFirstInQueue cleans up expired queue positions', async () => {
+    const context = initContext();
+    const lockId = 'lock-id';
+    const now = new Date().getTime();
+
+    const getLockQueueItems = async () =>
+      (await getDynamoItems(context)).filter(
+        (it) => it.PartitionKey.S == `lock-client:lock:${lockId}`,
+      );
+
+    const ticket1 = await context.dynamoLockClient.getNextTicketNumber(lockId);
+    const ticket2 = await context.dynamoLockClient.getNextTicketNumber(lockId);
+    const ticket3 = await context.dynamoLockClient.getNextTicketNumber(lockId);
+
+    await context.dynamoLockClient.enterWaitingQueue({
+      lockId: lockId,
+      ticketNumber: ticket1,
+      expiresAt: now - 20000,
+    });
+
+    await context.dynamoLockClient.enterWaitingQueue({
+      lockId: lockId,
+      ticketNumber: ticket2,
+      expiresAt: now - 10000,
+    });
+
+    await context.dynamoLockClient.enterWaitingQueue({
+      lockId: lockId,
+      ticketNumber: ticket3,
+      expiresAt: now + 30000,
+    });
+
+    // Expect three queue entries initially
+    await expect(getLockQueueItems()).resolves.toHaveLength(3);
+
+    // isFirstInQueue is eventually consistent, so we can't check this synchronously
+    await waitForExpect(() =>
+      expect(
+        context.dynamoLockClient.isFirstInQueue({
+          lockId: lockId,
+          ticketNumber: ticket3,
+          cleanupExpiredQueuePositions: true,
+        }),
+      ).resolves.toBe(true),
+    );
+
+    // Ensure that only one queue entry exists after we're first in queue, as others should have been cleaned up
+    await expect(getLockQueueItems()).resolves.toHaveLength(1);
   });
 });

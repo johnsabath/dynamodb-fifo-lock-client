@@ -62,45 +62,67 @@ export class DynamoDbLockClient {
     args: AcquireLockArgs,
     fn: T,
   ): Promise<UnwrapPromise<ReturnType<T>>> {
+    const startEpochMs = new Date().getTime();
+    const timeoutEpochMs =
+      startEpochMs + (args.acquireTimeoutMs ?? args.leaseDurationMs);
+
+    // Default heartbeatIntervalMs to leaseDurationMs / 4 if unset
     const heartbeatIntervalMs =
       args.heartbeatIntervalMs ?? args.leaseDurationMs / 4;
+
+    // Default acquireRetryIntervalMs to leaseDurationMs / 2 if unset
     const acquireRetryIntervalMs =
       args.acquireRetryIntervalMs ?? args.leaseDurationMs / 2;
-    const startEpochMs = new Date().getTime();
-    const timeoutEpochMs = startEpochMs + (args.acquireTimeoutMs ?? args.leaseDurationMs);
 
+    const getUpdatedExpiresAt = () =>
+      new Date().getTime() + args.leaseDurationMs;
+
+    // Take a ticket for the provided lockId and enter the waiting queue
     const ticketNumber = await this.getNextTicketNumber(args.lockId);
-
     await this.enterWaitingQueue({
       lockId: args.lockId,
       ticketNumber: ticketNumber,
-      expiresAt: new Date().getTime() + args.leaseDurationMs,
+      expiresAt: getUpdatedExpiresAt(),
     });
 
+    // Since we don't know how long it'll take to acquire the lock, we return a Promise here and we'll eventually
+    // call resolve or reject explicitly in the future.
     return new Promise(async (resolve, reject) => {
+      const cleanup = () => {
+        clearInterval(intervalRef);
+        this.leaveWaitingQueue({
+          lockId: args.lockId,
+          ticketNumber: ticketNumber,
+        }).catch((e) => {
+          // It's acceptable to fail relatively silently here as follow-up lock acquisitions will delete
+          // the expired queue position.
+          console.error('Failed to leave waiting queue: ' + e);
+        });
+      };
+
       // Execute lock expiration renewal function every heartbeatPeriodMs milliseconds
-      const intervalRef = setInterval(async () => {
-        try {
-          await this.sendHeartbeat({
-            lockId: args.lockId,
-            ticketNumber: ticketNumber,
-            expiresAt: new Date().getTime() + args.leaseDurationMs,
-          });
-        } catch (e) {
+      const intervalRef = setInterval(() => {
+        this.sendHeartbeat({
+          lockId: args.lockId,
+          ticketNumber: ticketNumber,
+          expiresAt: getUpdatedExpiresAt(),
+        }).catch((e) => {
           reject(e);
-        }
+          cleanup();
+        });
       }, heartbeatIntervalMs);
 
+      // Main lock acquisition loop
       try {
-        // Wait for our ticket to be ready
+        // While we're waiting in the queue, and we don't have the first position...
         while (
           !(await this.isFirstInQueue({
             lockId: args.lockId,
             ticketNumber: ticketNumber,
-            deleteExpiredQueuePositions: true,
+            cleanupExpiredQueuePositions: true,
           }))
         ) {
-          // If we've waited longer than our timeout, then raise an error
+          // Check to see if we've waited longer than the timeout, raise an error if so
           const nowEpochMs = new Date().getTime();
           if (nowEpochMs >= timeoutEpochMs) {
             throw new LockAcquisitionTimeout(
@@ -108,11 +130,20 @@ export class DynamoDbLockClient {
             );
           }
 
-          // Otherwise sleep for the polling period
+          // If we don't have the first queue position, and we haven't waited longer than the timeout,
+          // sleep for the retry interval and check again
           await sleep(acquireRetryIntervalMs);
         }
 
-        // Execute provided function
+        // If we get to here, we have acquired the lock!
+        // Now we execute the function that should be run while the lock is held.
+        //
+        // If it's a synchronous function (doesn't return a Promise), resolve with the function result, then release the
+        //    lock.
+        //
+        // If it's an asynchronous function (returns a Promise), hold the lock until the Promise completes, resolve or
+        //    reject based on the Promise result, then release the lock.
+        //
         const fnRes = fn();
         if (fnRes instanceof Promise) {
           resolve(await fnRes);
@@ -122,11 +153,7 @@ export class DynamoDbLockClient {
       } catch (e) {
         reject(e);
       } finally {
-        clearInterval(intervalRef);
-        await this.leaveWaitingQueue({
-          lockId: args.lockId,
-          ticketNumber: ticketNumber,
-        });
+        cleanup();
       }
     });
   }
@@ -183,19 +210,37 @@ export class DynamoDbLockClient {
   async isFirstInQueue(args: {
     lockId: string;
     ticketNumber: string;
-    deleteExpiredQueuePositions?: boolean;
+    cleanupExpiredQueuePositions?: boolean;
   }): Promise<boolean> {
     const expiredLocks: Record<string, any>[] = [];
     const now = new Date().getTime();
-    let page: Record<string, any>[] = [];
-    let resumeAfter: Record<string, any> | undefined;
+    let lastEvaluatedKey: Record<string, any> | undefined;
+
+    const doCleanupExpiredQueuePositions = async () => {
+      if (args.cleanupExpiredQueuePositions ?? false) {
+        // TODO: Use a batch call
+        await Promise.all(
+          expiredLocks.map((it) =>
+            this.dynamo
+              .deleteItem({
+                TableName: this.tableName,
+                Key: {
+                  PartitionKey: it.PartitionKey,
+                  SortKey: it.SortKey,
+                },
+              })
+              .promise(),
+          ),
+        );
+      }
+    };
 
     do {
       const res = await this.dynamo
         .query({
           TableName: this.tableName,
           ConsistentRead: true,
-          ExclusiveStartKey: resumeAfter,
+          ExclusiveStartKey: lastEvaluatedKey,
           ExpressionAttributeValues: {
             ':partitionKey': { S: `lock-client:lock:${args.lockId}` },
           },
@@ -205,38 +250,27 @@ export class DynamoDbLockClient {
         })
         .promise();
 
-      page = res.Items ?? [];
-      resumeAfter = res.LastEvaluatedKey;
-
-      for (const entry of page) {
-        if (parseInt(entry.expiresAt.N) < now) {
-          // capture expired locks for removal
+      // Iterate through each queue position for this lock
+      for (const entry of res.Items ?? []) {
+        const expiresAt = parseInt(entry.expiresAt.N!);
+        if (expiresAt < now) {
+          // If we come across any queue positions that have expired while looking for our own ticket number,
+          // mark them for deletion. This provides self-healing if a queue removal step failed.
           expiredLocks.push(entry);
         } else if (entry.SortKey.S === args.ticketNumber) {
-          // expired locks can be proactively deleted
-          if (args.deleteExpiredQueuePositions ?? false) {
-            await Promise.all(
-              expiredLocks.map((it) =>
-                this.dynamo
-                  .deleteItem({
-                    TableName: this.tableName,
-                    Key: {
-                      PartitionKey: { S: it.PartitionKey },
-                      SortKey: { S: it.SortKey },
-                    },
-                  })
-                  .promise(),
-              ),
-            );
-          }
-          // reached the front of queue
+          // we found our ticket number at the front of the queue (excluding expired entries).
+          await doCleanupExpiredQueuePositions();
           return true;
         } else {
-          // not at front of queue; cannot proceed
+          // our ticket number isn't at the front of the queue (excluding expired entries).
+          await doCleanupExpiredQueuePositions();
           return false;
         }
       }
-    } while (resumeAfter);
+
+      // lastEvaluatedKey will be set if there is more than one page of results left, allowing for us to paginate.
+      lastEvaluatedKey = res.LastEvaluatedKey;
+    } while (lastEvaluatedKey !== undefined);
 
     return false;
   }
