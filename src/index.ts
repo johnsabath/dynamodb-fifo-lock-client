@@ -96,7 +96,7 @@ export class DynamoDbLockClient {
         }).catch((e) => {
           // It's acceptable to fail relatively silently here as follow-up lock acquisitions will delete
           // the expired queue position.
-          console.error("Failed to leave waiting queue: " + e)
+          console.error('Failed to leave waiting queue: ' + e);
         });
       };
 
