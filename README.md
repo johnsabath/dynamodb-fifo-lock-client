@@ -2,8 +2,6 @@
 
 [![codecov](https://codecov.io/gh/johnsabath/dynamodb-fifo-lock-client/branch/main/graph/badge.svg?token=LCDUYI0ISB)](https://codecov.io/gh/johnsabath/dynamodb-fifo-lock-client)
 
-### Status: Experimental
-
 AWS DynamoDB distributed locking client with fencing tokens and FIFO acquisition queuing.
 
 Inspired by:
